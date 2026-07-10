@@ -32,7 +32,7 @@ export async function openModelPicker(pi: any, ctx: any): Promise<string | undef
 		hostUrl("../node_modules/@earendil-works/pi-tui/dist/index.js")
 	);
 	const { Container, Text, Spacer } = tuiMod;
-	const models: any[] = pi.modelRegistry?.getAll?.() ?? [];
+	const models: any[] = pi.modelRegistry?.getAvailable?.() ?? [];
 	if (models.length === 0) {
 		ctx.ui.notify("No models available in the registry", "error");
 		return undefined;
@@ -161,4 +161,88 @@ export async function openModelPicker(pi: any, ctx: any): Promise<string | undef
 			return new ModelPickerComponent(items, theme, done);
 		},
 	);
+}
+
+// ── Read-only list view (e.g. show all annotations) ─────────────────
+/**
+ * Open a read-only TUI list overlay. Closes on esc / enter / q / ctrl-c.
+ * Falls back to a single notify (lines joined by newlines) in non-TUI modes.
+ */
+export async function openListView(
+	ctx: any,
+	title: string,
+	lines: string[],
+): Promise<void> {
+	if (!ctx.ui?.custom) {
+		ctx.ui?.notify?.(lines.join("\n"), "info");
+		return;
+	}
+	const tuiMod: any = await import(
+		hostUrl("../node_modules/@earendil-works/pi-tui/dist/index.js"),
+	);
+	const { Container, Text, Spacer } = tuiMod;
+
+	class ListViewComponent extends Container {
+		private lines: string[];
+		private title: string;
+		private done: () => void;
+		private theme: any;
+
+		constructor(lines: string[], title: string, theme: any, done: () => void) {
+			super();
+			this.lines = lines;
+			this.title = title;
+			this.theme = theme;
+			this.done = done;
+			this.render();
+		}
+
+		private render() {
+			this.clear();
+			const t = this.theme;
+			this.addChild(
+				new Text(
+					t ? t.fg("accent", "  " + this.title) : "  " + this.title,
+					0,
+					0,
+				),
+			);
+			this.addChild(new Spacer(1));
+			if (this.lines.length === 0) {
+				this.addChild(
+					new Text(t ? t.fg("muted", "  (empty)") : "  (empty)", 0, 0),
+				);
+			} else {
+				for (const line of this.lines) {
+					this.addChild(new Text("  " + line, 0, 0));
+				}
+			}
+			this.addChild(new Spacer(1));
+			this.addChild(
+				new Text(
+					t ? t.fg("muted", "  esc / enter / q to close") : "  esc / enter / q to close",
+					0,
+					0,
+				),
+			);
+		}
+
+		handleInput(data: string) {
+			if (
+				data === "escape" ||
+				data === "return" ||
+				data === "enter" ||
+				data === "kpenter" ||
+				data === "ctrl+c" ||
+				data === "q"
+			) {
+				this.done();
+				return;
+			}
+		}
+	}
+
+	await ctx.ui.custom<void>((_tui: any, theme: any, _kb: any, done: () => void) => {
+		return new ListViewComponent(lines, title, theme, done);
+	});
 }

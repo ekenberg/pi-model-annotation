@@ -6,7 +6,7 @@
 // are best-effort and are bypassed entirely by the no-args interactive flow.
 
 import { loadAnnotations, saveAnnotations } from "./storage.js";
-import { openModelPicker } from "./picker.js";
+import { openModelPicker, openListView } from "./picker.js";
 
 export function registerModelAnnotationsCommand(
 	pi: any,
@@ -19,7 +19,7 @@ export function registerModelAnnotationsCommand(
 	const MODEL_ARG_SUBS = new Set(["get", "set", "add", "edit", "rm", "remove", "delete"]);
 	// Build model completion items filtered by prefix (matches value OR label).
 	const getModelCompletions = (modelPrefix: string): any[] | null => {
-		const models: any[] = pi.modelRegistry?.getAll?.() ?? [];
+		const models: any[] = pi.modelRegistry?.getAvailable?.() ?? [];
 		const items = models.map((m: any) => ({
 			value: m.id,
 			label: m.name && m.name !== m.id ? m.name : m.id,
@@ -138,13 +138,15 @@ function doList(ctx: any, load: () => Record<string, string>) {
 	const map = load();
 	const keys = Object.keys(map);
 	if (keys.length === 0) {
+		// Keep the empty-state as a notify (no point opening a TUI to show "empty").
 		return ctx.ui.notify(
 			"No model annotations yet. Run /model-annotations (no args) to add one.",
 			"info",
 		);
 	}
-	const lines = keys.map((k) => `${k}\n    ${map[k]}`);
-	return ctx.ui.notify(lines.join("\n"), "info");
+	const title = `Annotations (${keys.length})`;
+	const lines = keys.map((k) => `${k}  —  ${map[k]}`);
+	return openListView(ctx, title, lines);
 }
 
 function doGet(ctx: any, load: () => Record<string, string>, id: string) {
