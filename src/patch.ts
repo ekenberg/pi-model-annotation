@@ -64,19 +64,24 @@ function appendAnnotations(
 		for (const child of children) {
 			const t: unknown = (child as any)?.text;
 			if (typeof t !== "string") continue;
-			if (t.includes("Model Name:")) continue; // skip footer line
-			if (!/^\s*(→\s*)?\S/.test(t)) continue; // only row-like lines
-			const m = t.match(/(?:→\s*)?(\S+?)\s+\[([^\]]+)\]/);
+			// pi wraps both the model id and the provider badge in theme.fg(...), so the
+			// raw row text contains ANSI SGR codes between the space and the `[`. Strip
+			// them so the row regex and id lookup can match plain text.
+			const plain: string = t.replace(/\x1b\[[0-9;]*m/g, "");
+			if (plain.includes("Model Name:")) continue; // skip footer line
+			if (!/^\s*(→\s*)?\S/.test(plain)) continue; // only row-like lines
+			const m = plain.match(/(?:→\s*)?(\S+?)\s+\[([^\]]+)\]/);
 			if (!m) continue;
 			const note = getNote(m[1]);
 			if (!note) continue;
-			if (t.includes("—")) continue; // already tagged (defensive)
+			if (plain.includes("—")) continue; // already tagged (defensive)
 			// Keep the inline tag short so long notes don't wreck the row; full note is in the detail pane.
 			const MAX_INLINE = 40;
 			const shortNote =
 				note.length > MAX_INLINE
 					? note.slice(0, MAX_INLINE).replace(/[\s,;:.-]+\S*$/, "") + "…"
 					: note;
+			// Append to the original (styled) text so the row's existing colors are preserved.
 			(child as any).setText(t + theme.fg("muted", "  —  " + shortNote));
 		}
 	}
