@@ -24,11 +24,16 @@ then appends our annotation. Unpatch on `session_shutdown`.
 (the id token shown in `/model` rows — consistent across the row regex
 and `event.model.id`).
 
-**Editor.** `/model-annotations` slash command
-(`list | get | set | add | edit | rm | remove | delete <model-id> <note>`).
-`set` with no note opens `ctx.ui.input` prefilled with the existing note.
-Tab completion completes the subcommand and the model id from
-`pi.modelRegistry.getAll()`.
+**Editor.** `/model-annotations` (no arguments) opens a single interactive
+TUI component via `ctx.ui.custom`. A fuzzy-filtered list shows annotated
+models sorted to the top (★ marker + note hint), followed by all other
+available models. Enter opens an inline `Input` to edit/create the note
+(prefilled if one exists). Ctrl+D triggers an inline confirm prompt (y/n)
+to delete the annotation. Esc cancels edit/confirm and returns to the list;
+Esc in the list exits. The annotation JSON file
+(`~/.pi/agent/model-annotations.json`) is the scriptable surface for
+power-user automation (`jq`, etc.) — there are no subcommands or
+command-line forms.
 
 **Footer widget.** `pi.on("model_select")` shows the active model's
 annotation via `ctx.ui.setWidget` (cleared when none).

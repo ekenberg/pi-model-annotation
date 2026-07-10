@@ -1,32 +1,71 @@
 # pi-model-annotation — Status & Handoff
 
-*Session: 2026-07-10 (2nd). Built with AI assistance (transparently AI-generated; see README).*
+*Session: 2026-07-10 (3rd). Built with AI assistance (transparently AI-generated; see README).*
 
 This is the handoff document for the next session. Read §5 (gotchas) and §7 before changing anything.
 
----
+## 0. CURRENT STATE (2026-07-10 3rd session — unified editor redesign)
 
-## 0. CURRENT STATE (2026-07-10 2nd session)
+**The subcommand/command-line architecture is GONE.** `/model-annotations`
+(no args, no tab completion) opens ONE interactive component via `ctx.ui.custom`
+— a single fuzzy-filtered list with inline edit + confirm modes. Designed by
+user, fleshed out by planner+reviewer subagents, implemented via a
+worker↔reviewer loop (2 rounds; round 2 passed clean).
 
-**The picker freeze bug is FIXED.** Root cause was NOT focus/key-dispatch wiring
-(STATUS v1 §7's diagnosis was wrong). The real cause: `handleInput(data)`
-compared RAW terminal escape sequences (`"\x1b"`, `"\x1b[A"`, `"\r"`) against
-PARSED key-name strings (`"escape"`, `"up"`, `"return""). The TUI delivers raw
-bytes to `focusedComponent.handleInput(data)` (tui.js:609), not key names.
-Every comparison silently failed; only printable chars matched → picker
-displayed but never responded → pi appeared hung.
+### UX
+- **List mode:** annotated models sort to top with `★` + note hint; all other
+  available models follow. Orphaned annotations (model removed from registry)
+  appear at top. Annotated models in the registry show their **name** as label
+  (id+note as hint); orphans show id as label. Fuzzy filter (id+name+note).
+  - ↑/↓ navigate (wrap) · Enter → edit · Ctrl+D → confirm · Esc → exit · type to filter
+- **Edit mode:** embedded pi-tui `Input` (NOT `ctx.ui.input` — that CANNOT
+  prefill; `ExtensionInputComponent` ignores its placeholder arg). Cursor
+  placed at end of existing note on entry.
+  - Enter = save (non-empty) → refreshed list · Esc = cancel → list ·
+    Ctrl+D → confirm · **Empty+Enter = cancel** (NOT delete — safe)
+- **Confirm mode (inline, NOT `ctx.ui.confirm`):** `ctx.ui.confirm` DESTROYS
+  the `ctx.ui.custom` component (replaces editorContainer, restores editor on
+  resolve → orphans our component, promise hangs forever). So delete confirm is
+  a third inline mode: y/Enter = delete, n/Esc = cancel → previous mode.
+  - `handleInput` is SYNC (no await) — the inline confirm eliminated the only
+    async path. TUI's `handleInput(data); requestRender()` flow is strictly
+    better with sync handlers.
+- **Esc semantics:** Esc in edit/confirm = cancel→list; Esc in list = exit.
+- On return to list: rebuild from `load()` + `modelRegistry.getAvailable()`,
+  preserve search filter + selection position.
 
-**Fix:** rewrote `picker.ts` to use pi-tui's `Input` + `fuzzyFilter` +
-`getKeybindings().matches(data, "tui.select.up")` (exactly what every working
-pi component uses — see `ModelSelectorComponent`, `SelectList`, `preset.ts`).
-The component is a `Container implements Focusable` mirroring
-`ModelSelectorComponent` (embedded `Input` + repopulated `listContainer`, no
-`render()` override). Verified by oracle review + load check (exit 0).
+### Deal-breaker fixes applied
+- **Footer widget staleness:** widget only updated on `model_select`. If the
+  user edited the ACTIVE model's annotation, footer showed stale data. Fixed:
+  after save/delete, if `editingId === ctx.model?.id`, call `ctx.ui.setWidget`
+  immediately.
+- **Prefill bug (pre-existing, now moot):** old `doSet` called
+  `ctx.ui.input(title, existing)` but `ExtensionInputComponent` ignores the
+  placeholder — prefill silently never worked. Inline `Input`+`setValue` fixes it.
 
-Also applied: scoped `get`/`rm` pickers (annotated models only, via new
-`openAnnotatedModelPicker`); footer widget uses `m.id` (was double-prefixing);
-dropped dead `modelKey()` from storage.ts; dropped `add`/`edit`/`remove`/
-`delete` subcommand aliases (keep `list`/`get`/`set`/`rm`).
+### What was deleted
+- All subcommands, command-line parsing, tab completion, `doList`/`doGet`/
+  `doSet`/`doRm`, `runInteractiveFlow`, `runCommandLine`, `SUBS`,
+  `MODEL_ARG_SUBS`, `cachedModels`, `getModelCompletions`, `getArgumentCompletions`.
+- `openModelPicker`, `openAnnotatedModelPicker`, `openListView`, `PickerItem`
+  (replaced by `openAnnotationEditor` + `AnnotationEditorComponent`).
+
+### Design rationale
+- **No tabs:** reviewer argued tabs are over-engineered for a 5-20 annotated set
+  vs 350+ in all. `/model`'s scoped/all analogy doesn't hold (there both sets
+  are large). Single list with annotated sorted to top + `★` = the "show me my
+  notes" view for free, ~30-40% less code.
+- **No empty-save-deletes:** accidental-loss risk. Empty+Enter=cancel, Ctrl+D =
+  explicit delete with confirm.
+
+### Earlier context (still relevant): the key-handling fix
+The picker once froze because `handleInput(data)` compared RAW terminal escape
+sequences against PARSED key-name strings (`"escape"`, `"up"`). The TUI
+delivers raw bytes to `focusedComponent.handleInput` (tui.js:609). Fix: use
+`getKeybindings().matches()` / `matchesKey()`. The unified editor uses these
+correctly; the only raw `data ===` comparisons are printable chars (y/n) in
+the confirm sub-mode, which is correct.
+
 
 ---
 
