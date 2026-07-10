@@ -2,11 +2,6 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
 export type AnnotationMap = Record<string, string>;
 
-/** pi model identity is "provider/id", same shape as scoped-models patterns. */
-export function modelKey(provider: string, id: string): string {
-	return `${provider}/${id}`;
-}
-
 /** Read annotations; never throws (corrupt file -> empty map). */
 export function loadAnnotations(path: string): AnnotationMap {
 	try {

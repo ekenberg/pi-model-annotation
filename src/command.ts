@@ -1,7 +1,7 @@
 // `/model-annotations` editor command.
 //
 // Interactive (no args): subcommand select -> searchable model picker -> note input.
-// Command-line (args):  power-user shortcut (list / get / set / add / edit / rm / remove / delete).
+// Command-line (args):  power-user shortcut (list / get / set / rm).
 //
 // IMPORTANT wiring note: the factory-time `pi` (ExtensionAPI returned by
 // `createExtensionAPI` in pi's loader) does NOT expose `modelRegistry` at runtime
@@ -12,7 +12,7 @@
 // which receives no `ctx`.
 
 import { loadAnnotations, saveAnnotations } from "./storage.js";
-import { openModelPicker, openListView } from "./picker.js";
+import { openModelPicker, openAnnotatedModelPicker, openListView } from "./picker.js";
 
 export function registerModelAnnotationsCommand(
 	pi: any,
@@ -20,9 +20,9 @@ export function registerModelAnnotationsCommand(
 	load: () => Record<string, string>,
 	save: (m: Record<string, string>) => void,
 ): void {
-	const SUBS = ["list", "get", "set", "add", "edit", "rm", "remove", "delete"] as const;
+	const SUBS = ["list", "get", "set", "rm"] as const;
 	// Subcommands that take a <model-id> as their next argument.
-	const MODEL_ARG_SUBS = new Set(["get", "set", "add", "edit", "rm", "remove", "delete"]);
+	const MODEL_ARG_SUBS = new Set(["get", "set", "rm"]);
 
 	// Cached available models, populated lazily from ctx.modelRegistry on first
 	// command use. getArgumentCompletions has no `ctx` (pi's provider calls it
@@ -98,12 +98,12 @@ async function runInteractiveFlow(
 	if (!choice) return;
 	if (choice === "list") return doList(ctx, load);
 	if (choice === "get") {
-		const id = await openModelPicker(ctx);
+		const id = await openAnnotatedModelPicker(ctx, load);
 		if (!id) return;
 		return doGet(ctx, load, id);
 	}
 	if (choice === "rm") {
-		const id = await openModelPicker(ctx);
+		const id = await openAnnotatedModelPicker(ctx, load);
 		if (!id) return;
 		return doRm(ctx, load, save, id);
 	}
@@ -130,13 +130,13 @@ async function runCommandLine(
 		if (!id) return fail("Usage: /model-annotations get <model-id>");
 		return doGet(ctx, load, id);
 	}
-	if (sub === "rm" || sub === "remove" || sub === "delete") {
+	if (sub === "rm") {
 		const id = tokens[1];
 		if (!id) return fail("Usage: /model-annotations rm <model-id>");
 		// Power-user shortcut: no confirm dialog.
 		return doRm(ctx, load, save, id, { skipConfirm: true });
 	}
-	if (sub === "set" || sub === "add" || sub === "edit") {
+	if (sub === "set") {
 		const id = tokens[1];
 		if (!id) return fail("Usage: /model-annotations set <model-id> <note...>");
 		return doSet(ctx, load, save, id, { noteArg: tokens.slice(2).join(" ") });

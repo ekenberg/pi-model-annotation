@@ -73,7 +73,7 @@ export default async function (pi: any) {
 		const m = event?.model;
 		if (!m) return;
 		const note = loadAnnotations(path)[m.id];
-		if (note) ctx.ui.setWidget("model-annotations", [`${m.provider}/${m.id}`, note]);
+		if (note) ctx.ui.setWidget("model-annotations", [m.id, note]);
 		else ctx.ui.setWidget("model-annotations", undefined);
 	});
 }

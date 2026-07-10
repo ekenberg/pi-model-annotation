@@ -1,8 +1,32 @@
 # pi-model-annotation — Status & Handoff
 
-*Session: 2026-07-10. Built with AI assistance (transparently AI-generated; see README).*
+*Session: 2026-07-10 (2nd). Built with AI assistance (transparently AI-generated; see README).*
 
-This is the handoff document for the next session. Read §5 (gotchas), §7 (known issues), and §9 (future work) before changing anything.
+This is the handoff document for the next session. Read §5 (gotchas) and §7 before changing anything.
+
+---
+
+## 0. CURRENT STATE (2026-07-10 2nd session)
+
+**The picker freeze bug is FIXED.** Root cause was NOT focus/key-dispatch wiring
+(STATUS v1 §7's diagnosis was wrong). The real cause: `handleInput(data)`
+compared RAW terminal escape sequences (`"\x1b"`, `"\x1b[A"`, `"\r"`) against
+PARSED key-name strings (`"escape"`, `"up"`, `"return""). The TUI delivers raw
+bytes to `focusedComponent.handleInput(data)` (tui.js:609), not key names.
+Every comparison silently failed; only printable chars matched → picker
+displayed but never responded → pi appeared hung.
+
+**Fix:** rewrote `picker.ts` to use pi-tui's `Input` + `fuzzyFilter` +
+`getKeybindings().matches(data, "tui.select.up")` (exactly what every working
+pi component uses — see `ModelSelectorComponent`, `SelectList`, `preset.ts`).
+The component is a `Container implements Focusable` mirroring
+`ModelSelectorComponent` (embedded `Input` + repopulated `listContainer`, no
+`render()` override). Verified by oracle review + load check (exit 0).
+
+Also applied: scoped `get`/`rm` pickers (annotated models only, via new
+`openAnnotatedModelPicker`); footer widget uses `m.id` (was double-prefixing);
+dropped dead `modelKey()` from storage.ts; dropped `add`/`edit`/`remove`/
+`delete` subcommand aliases (keep `list`/`get`/`set`/`rm`).
 
 ---
 
@@ -100,39 +124,47 @@ The `!options.force` gate in pi's autocomplete provider deliberately bypasses ar
 - **`/model-annotations` (no args) → subcommand picker**: the 4-option `ctx.ui.select` (`list` / `get` / `set` / `rm`) appears. `list` opens a proper `openListView` TUI overlay (the old multi-line `ctx.ui.notify` was invisible).
 - **Extension loads cleanly** in the installed clone (verified with `pi -p "ignore"`, exit 0).
 
-## 7. Known issues (NOT fixed — to be addressed in the next session)
+## 7. Known issues — RESOLVED (2026-07-10 2nd session)
 
-The user explicitly asked to stop coding at this point. The following are real, reproducible bugs. All three likely share a root cause in the focus / key-dispatch wiring of `ctx.ui.custom`.
+All three issues from v1 shared the SAME root cause and are fixed by the
+picker rewrite in §0. Recording the (wrong) v1 diagnosis + the real fix:
 
-### 7.1 `list` view TUI is read-only and `Esc` does nothing
-- `src/picker.ts` `ListViewComponent.handleInput` claims to close on `escape`/`return`/`enter`/`kpenter`/`ctrl+c`/`q`. The user reports `Esc` did nothing and the list is not editable.
-- **Intended behavior**: `list` should show annotations as a navigable, editable list — `↑/↓` to move, `Enter` to edit the highlighted entry (open a `ctx.ui.input` pre-filled with the current note, then save), `Esc` to close. This makes `list` a one-stop shop: see all notes, jump to one, edit it.
-- **Suspected cause**: the `ctx.ui.custom` overlay may not be receiving key focus (the editor may still be capturing keys), or the key name `data` in `handleInput` doesn't match what pi-tui sends. Debug by logging what `data` arrives in `handleInput` to confirm keys are delivered at all.
+### 7.1 `list` view TUI is read-only and `Esc` did nothing  — FIXED
+Real cause: same raw-vs-parsed key bug. `ListViewComponent.handleInput` now
+uses `getKeybindings().matches(data, "tui.select.cancel")` etc. Also added
+↑/↓ navigation + windowing. Enter/Esc/q all close. (Making `list` editable
+on Enter — the v1 §9.2 future idea — was NOT done; out of scope for this
+fix. The `set` flow covers editing.)
 
-### 7.2 `get` / `set` / `rm` picker freezes pi (no input, can't escape)
-- `src/picker.ts` `ModelPickerComponent.handleInput` handles printable chars, `backspace`, `up`, `down`, `return`/`enter`/`kpenter`, `escape`/`ctrl+c`. The user reports: the picker shows the model list (rendering works — that fix is in), but then **typing / arrow keys / Esc do nothing** — pi is completely unresponsive and must be killed externally.
-- **Suspected cause**: same as 7.1 — `ctx.ui.custom` may not be giving the factory's component keyboard focus, or keys are being swallowed by the underlying editor. The render fix made the picker display correctly; the interaction layer is the remaining gap. Since the picker shows the list, `Container` + `Text` + `Spacer` from the dynamic host import are correct.
-- **Debug path**: verify the component receives focus (`ctx.ui.custom` doc says "Show a custom component with keyboard focus"). Inspect whether `handleInput` is ever called. If not, the fix is a focus / key-dispatch wiring issue. Possible workarounds: (a) implement the component as `Focusable` and request focus explicitly, (b) drive the picker externally via `pi.registerShortcut`, or (c) rebuild the picker using pi's existing `SelectList` component (from pi-tui) which may have working focus.
+### 7.2 `get`/`set`/`rm` picker froze pi  — FIXED
+Real cause: raw-vs-parsed key comparison (see §0). `ModelPickerComponent`
+now uses `Input` (search) + `fuzzyFilter` + `getKeybindings().matches()`.
+Focus was never broken — `showExtensionCustom` calls `setFocus(component)`
+and `requestRender()` correctly (interactive-mode.js:1898).
 
-### 7.3 `rm` shows ALL models, not only annotated ones
-- The current `runInteractiveFlow` for `rm` (and `get`) calls `openModelPicker(ctx)` which lists all ~350 available models. The user wants `rm` and `get` to show **only models that already have an annotation** (so you can pick which to remove, or retrieve an existing note).
-- **Intended fix**: in `runInteractiveFlow`, for `get` and `rm`, build a separate items list from the annotations map (keys = annotated model ids; display = id + the note as a hint), and use a dedicated `openAnnotatedModelPicker(ctx, load)` — or extend `openModelPicker` to take a custom items list. For `set` (adding a new note), the full model list is still right.
+### 7.3 `rm`/`get` showed ALL models  — FIXED
+`get`/`rm` now route through `openAnnotatedModelPicker(ctx, load)`, which
+shows only models that already have a note (note shown as a muted hint).
+`set` still uses the full `openModelPicker` (you add a note to a new model).
 
 ## 8. Bypassed / deferred (with rationale)
 
 - **Multi-level argument tab completion** (subcommand + model id in one `getArgumentCompletions`): the level-aware code is correct, but pi's autocomplete state machine is unreliable for chained arguments. The no-args interactive flow bypasses it. The level-aware code stays in `command.ts` for the cases that *do* work. **Don't try to fix this** — it's a pi design constraint.
 - **Full TUI note editor** (multi-line textarea, word wrap, etc.): deferred per earlier "one thing at a time" guidance. `set` uses `ctx.ui.input` (single-line prompt). If a richer note editor is wanted later, the picker pattern can be extended.
 
-## 9. Future work / open questions (intent for the next session)
+## 9. Future work / open questions
 
-Rough priority order:
-
-1. **Fix the picker interaction** (issue 7.2) — the most blocking. Debug focus / key delivery for `ctx.ui.custom`. Likely requires either a pi-tui focus fix or a workaround (Focusable + explicit focus, or driving via `pi.registerShortcut`, or using pi-tui's `SelectList`).
-2. **Make `list` editable + fix Esc** (issue 7.1) — `ListViewComponent` should support `↑/↓` navigation, `Enter` to edit (open `ctx.ui.input` prefilled with the note, then save), `Esc` to close. Likely depends on (1).
-3. **Scoped `get` / `rm` pickers** (issue 7.3) — show only annotated models. Add `openAnnotatedModelPicker(ctx, load)` that reads the annotations map and shows those models + their notes as hints.
-4. **Polish**: `Esc` / `Ctrl+C` consistency across both TUIs; ensure the picker and the list view can be aborted cleanly without leaving residual UI state.
-5. **Tests**: there is no test suite. A small unit test for `appendAnnotations` (inline regex + ANSI strip) and for the level-aware `getArgumentCompletions` token parser would catch regressions cheaply. The jiti + real-host harness from earlier was fragile; transpile TS and unit-test pure functions without jiti.
-6. **Documentation**: `README.md` and `DEV.md` were written early and don't reflect the current interactive-flow design or the gotchas in §5. Update them (especially the "no `dependencies`" + host-dynamic-import pattern, and the modelRegistry factory bug) for future contributors.
+1. **`list` editable on Enter** (deferred from v1 §7.1): Enter on a highlighted
+   annotation in the `list` view could open `ctx.ui.input` prefilled + save.
+   Currently `list` is read-only with working Esc/nav; `set` covers editing.
+   Trivial to add now that the picker/list pattern works.
+2. **Tests**: no suite. A unit test for `appendAnnotations` (inline regex + ANSI
+   strip) and the level-aware `getArgumentCompletions` token parser would catch
+   regressions cheaply. Transpile TS and unit-test pure functions without jiti.
+3. **Documentation**: `README.md` and `DEV.md` predate the interactive-flow
+   design and the §5 gotchas. Update them (especially the "no `dependencies`"
+   + host-dynamic-import pattern, the modelRegistry factory bug, and the
+   raw-vs-parsed key lesson in §0).
 
 ## 10. Build / install / test cheatsheet
 
