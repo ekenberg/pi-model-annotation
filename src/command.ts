@@ -15,32 +15,64 @@ export function registerModelAnnotationsCommand(
 	save: (m: Record<string, string>) => void,
 ): void {
 	const SUBS = ["list", "get", "set", "add", "edit", "rm", "remove", "delete"] as const;
+	// Subcommands that take a <model-id> as their next argument.
+	const MODEL_ARG_SUBS = new Set(["get", "set", "add", "edit", "rm", "remove", "delete"]);
+	// Build model completion items filtered by prefix (matches value OR label).
+	const getModelCompletions = (modelPrefix: string): any[] | null => {
+		const models: any[] = pi.modelRegistry?.getAll?.() ?? [];
+		const items = models.map((m: any) => ({
+			value: m.id,
+			label: m.name && m.name !== m.id ? m.name : m.id,
+		}));
+		if (!modelPrefix) return items.length > 0 ? items : null;
+		const p = modelPrefix.toLowerCase();
+		const matched = items.filter(
+			(i: any) =>
+				i.value.toLowerCase().startsWith(p) || (i.label || "").toLowerCase().startsWith(p),
+		);
+		return matched.length > 0 ? matched : null;
+	};
 	pi.registerCommand("model-annotations", {
 		description:
 			"Manage model annotations shown in /model (list | get | set | rm <model-id> <note>)",
-		getArgumentCompletions: (prefix: string): any => {
-			const p = (prefix || "").toLowerCase();
-			// Empty prefix -> assume 1st token (subcommand) to avoid dumping 350 model ids.
-			if (p === "") {
+		// The provider hands us the ENTIRE text after the first space, across all argument
+		// levels. Our command has two levels: <subcommand> then <model-id>. We must
+		// decide which level the cursor is at from the raw text + trailing space.
+		getArgumentCompletions: (argumentText: string): any => {
+			const raw = argumentText ?? "";
+			const endsWithSpace = raw.length > 0 && /\s$/.test(raw);
+			const tokens = raw.trim() === "" ? [] : raw.trim().split(/\s+/);
+
+			// Level 0: no subcommand yet -> subcommand list.
+			if (tokens.length === 0) {
 				return SUBS.map((s) => ({ value: s, label: s }));
 			}
-			// If the prefix still matches a subcommand start, treat as 1st token.
-			const subMatches = SUBS.filter((s) => s.startsWith(p));
-			if (subMatches.length > 0) {
-				return subMatches.map((s) => ({ value: s, label: s }));
+
+			// Level 1 (typing the subcommand): no trailing space -> still at subcommand level.
+			if (tokens.length === 1 && !endsWithSpace) {
+				const p = tokens[0].toLowerCase();
+				const subs = SUBS.filter((s) => s.toLowerCase().startsWith(p));
+				return subs.length > 0 ? subs.map((s) => ({ value: s, label: s })) : null;
 			}
-			// Otherwise -> 2nd token: complete model ids from the registry.
-			const models: any[] = pi.modelRegistry?.getAll?.() ?? [];
-			const items = models.map((m: any) => ({
-				value: m.id,
-				label: m.name && m.name !== m.id ? m.name : m.id,
-			}));
-			const matched = items.filter(
-				(i: any) =>
-					i.value.toLowerCase().startsWith(p) ||
-					(i.label || "").toLowerCase().startsWith(p),
-			);
-			return matched.length > 0 ? matched : null;
+
+			// Subcommand is committed; from here on, only model-arg subcommands have more.
+			const sub = tokens[0];
+			if (!MODEL_ARG_SUBS.has(sub)) {
+				return null; // e.g. "list " -> no further argument
+			}
+
+			// Level 2: model id.
+			//   tokens.length === 1 with trailing space -> model level, empty prefix.
+			//   tokens.length === 2, no trailing space -> model level, prefix = tokens[1].
+			if (tokens.length === 1) {
+				return getModelCompletions("");
+			}
+			if (tokens.length === 2 && !endsWithSpace) {
+				return getModelCompletions(tokens[1]);
+			}
+
+			// Past the model id: <note...> for set/add/edit, or done for get/rm/remove/delete.
+			return null;
 		},
 		handler: async (args: string, ctx: any) => {
 			const tokens = args.trim().split(/\s+/).filter(Boolean);
