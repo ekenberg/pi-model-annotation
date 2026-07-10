@@ -2,6 +2,11 @@
 // for multi-level extension commands by giving the user a reliable, searchable
 // list. Type to filter (substring on id or name), up/down to navigate,
 // enter to pick, esc to cancel.
+//
+// The component class is defined inside `openModelPicker` (after the dynamic
+// host import) so `Container` is in scope at declaration time. A top-level
+// `class ... extends Container` would fail at module load because the host
+// import is async and the class declaration runs before it resolves.
 
 import { realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -34,128 +39,126 @@ export async function openModelPicker(pi: any, ctx: any): Promise<string | undef
 	}
 	const items = models.map((m: any) => ({ id: m.id, name: m.name }));
 
+	// Define the component class inside this function so `Container` is in scope.
+	class ModelPickerComponent extends Container {
+		private items: { id: string; name?: string }[];
+		private filter: string = "";
+		private selectedIndex: number = 0;
+		private done: (r: string | undefined) => void;
+		private theme: any;
+		private maxVisible = 10;
+
+		constructor(
+			items: { id: string; name?: string }[],
+			theme: any,
+			done: (r: string | undefined) => void,
+		) {
+			super();
+			this.items = items;
+			this.theme = theme;
+			this.done = done;
+			this.render();
+		}
+
+		private get filtered(): { id: string; name?: string }[] {
+			const f = this.filter.toLowerCase();
+			if (!f) return this.items;
+			return this.items.filter(
+				(m) =>
+					m.id.toLowerCase().includes(f) ||
+					(m.name && m.name.toLowerCase().includes(f)),
+			);
+		}
+
+		private render() {
+			this.clear();
+			const t = this.theme;
+			// Filter line
+			const filterLine =
+				(t ? t.fg("accent", "  Filter: ") : "  Filter: ") + this.filter + "█";
+			this.addChild(new Text(filterLine, 0, 0));
+			this.addChild(new Spacer(1));
+
+			const items = this.filtered;
+			if (items.length === 0) {
+				this.addChild(
+					new Text((t ? t.fg("muted", "  no matches") : "  no matches"), 0, 0),
+				);
+			} else {
+				if (this.selectedIndex >= items.length) this.selectedIndex = items.length - 1;
+				if (this.selectedIndex < 0) this.selectedIndex = 0;
+
+				const start = Math.max(
+					0,
+					Math.min(
+						this.selectedIndex - Math.floor(this.maxVisible / 2),
+						items.length - this.maxVisible,
+					),
+				);
+				const end = Math.min(start + this.maxVisible, items.length);
+				for (let i = start; i < end; i++) {
+					const m = items[i];
+					const isSel = i === this.selectedIndex;
+					const label =
+						m.name && m.name !== m.id
+							? `${m.name}  ${t ? t.fg("muted", m.id) : m.id}`
+							: m.id;
+					const prefix = isSel ? (t ? t.fg("accent", "→ ") : "→ ") : "  ";
+					const text = isSel && t ? t.fg("accent", label) : label;
+					this.addChild(new Text(prefix + text, 0, 0));
+				}
+				this.addChild(new Spacer(1));
+				const hint = `  ${items.length} match${items.length === 1 ? "" : "es"}  ·  type to filter  ·  ↑↓ navigate  ·  enter select  ·  esc cancel`;
+				this.addChild(new Text((t ? t.fg("muted", hint) : hint), 0, 0));
+			}
+		}
+
+		handleInput(data: string) {
+			if (data === "escape" || data === "ctrl+c") {
+				this.done(undefined);
+				return;
+			}
+			if (data === "return" || data === "enter" || data === "kpenter") {
+				const items = this.filtered;
+				if (items.length > 0) this.done(items[this.selectedIndex].id);
+				else this.done(undefined);
+				return;
+			}
+			if (data === "up") {
+				const items = this.filtered;
+				if (items.length > 0) {
+					this.selectedIndex = Math.max(0, this.selectedIndex - 1);
+					this.render();
+				}
+				return;
+			}
+			if (data === "down") {
+				const items = this.filtered;
+				if (items.length > 0) {
+					this.selectedIndex = Math.min(items.length - 1, this.selectedIndex + 1);
+					this.render();
+				}
+				return;
+			}
+			if (data === "backspace") {
+				if (this.filter.length > 0) {
+					this.filter = this.filter.slice(0, -1);
+					this.selectedIndex = 0;
+					this.render();
+				}
+				return;
+			}
+			if (data.length === 1 && data.charCodeAt(0) >= 32) {
+				this.filter += data;
+				this.selectedIndex = 0;
+				this.render();
+			}
+		}
+	}
+
 	return ctx.ui.custom<string | undefined>(
 		(_tui: any, theme: any, _kb: any, done: (r: string | undefined) => void) => {
 			return new ModelPickerComponent(items, theme, done);
 		},
 	);
-}
-
-class ModelPickerComponent extends Container {
-	private items: { id: string; name?: string }[];
-	private filter: string = "";
-	private selectedIndex: number = 0;
-	private done: (r: string | undefined) => void;
-	private theme: any;
-	private maxVisible = 10;
-
-	constructor(
-		items: { id: string; name?: string }[],
-		theme: any,
-		done: (r: string | undefined) => void,
-	) {
-		super();
-		this.items = items;
-		this.theme = theme;
-		this.done = done;
-		this.render();
-	}
-
-	private get filtered(): { id: string; name?: string }[] {
-		const f = this.filter.toLowerCase();
-		if (!f) return this.items;
-		return this.items.filter(
-			(m) =>
-				m.id.toLowerCase().includes(f) ||
-				(m.name && m.name.toLowerCase().includes(f)),
-		);
-	}
-
-	private render() {
-		this.clear();
-		const t = this.theme;
-		const accent = t ? t.fg("accent", "") : "";
-		const muted = t ? t.fg("muted", "") : "";
-
-		// Filter line
-		const filterLine = (t ? t.fg("accent", "  Filter: ") : "  Filter: ") + this.filter + "█";
-		this.addChild(new Text(filterLine, 0, 0));
-		this.addChild(new Spacer(1));
-
-		const items = this.filtered;
-		if (items.length === 0) {
-			this.addChild(new Text((t ? t.fg("muted", "  no matches") : "  no matches"), 0, 0));
-		} else {
-			// Clamp selectedIndex to the current filtered range.
-			if (this.selectedIndex >= items.length) this.selectedIndex = items.length - 1;
-			if (this.selectedIndex < 0) this.selectedIndex = 0;
-
-			const start = Math.max(
-				0,
-				Math.min(
-					this.selectedIndex - Math.floor(this.maxVisible / 2),
-					items.length - this.maxVisible,
-				),
-			);
-			const end = Math.min(start + this.maxVisible, items.length);
-			for (let i = start; i < end; i++) {
-				const m = items[i];
-				const isSel = i === this.selectedIndex;
-				const label =
-					m.name && m.name !== m.id ? `${m.name}  ${t ? t.fg("muted", m.id) : m.id}` : m.id;
-				const prefix = isSel ? (t ? t.fg("accent", "→ ") : "→ ") : "  ";
-				const text = isSel && t ? t.fg("accent", label) : label;
-				this.addChild(new Text(prefix + text, 0, 0));
-			}
-			this.addChild(new Spacer(1));
-			const hint = `  ${items.length} match${items.length === 1 ? "" : "es"}  ·  type to filter  ·  ↑↓ navigate  ·  enter select  ·  esc cancel`;
-			this.addChild(new Text((t ? t.fg("muted", hint) : hint), 0, 0));
-		}
-		// Reference variables so linters don't strip them; they document intent.
-		void accent;
-		void muted;
-	}
-
-	handleInput(data: string) {
-		if (data === "escape" || data === "ctrl+c") {
-			this.done(undefined);
-			return;
-		}
-		if (data === "return" || data === "enter" || data === "kpenter") {
-			const items = this.filtered;
-			if (items.length > 0) this.done(items[this.selectedIndex].id);
-			else this.done(undefined);
-			return;
-		}
-		if (data === "up") {
-			const items = this.filtered;
-			if (items.length > 0) {
-				this.selectedIndex = Math.max(0, this.selectedIndex - 1);
-				this.render();
-			}
-			return;
-		}
-		if (data === "down") {
-			const items = this.filtered;
-			if (items.length > 0) {
-				this.selectedIndex = Math.min(items.length - 1, this.selectedIndex + 1);
-				this.render();
-			}
-			return;
-		}
-		if (data === "backspace") {
-			if (this.filter.length > 0) {
-				this.filter = this.filter.slice(0, -1);
-				this.selectedIndex = 0;
-				this.render();
-			}
-			return;
-		}
-		// Printable character (length 1, not a control char).
-		if (data.length === 1 && data.charCodeAt(0) >= 32) {
-			this.filter += data;
-			this.selectedIndex = 0;
-			this.render();
-		}
-	}
 }
