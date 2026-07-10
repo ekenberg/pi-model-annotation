@@ -235,7 +235,7 @@ export async function openAnnotationEditor(
 				items.push({
 					id,
 					label: name ?? id,
-					hint: name ? `${id}  —  ${notes[id]}` : notes[id],
+					hint: `—  ${notes[id]}`,
 					searchText: `${id} ${name ?? ""} ${notes[id]}`,
 					annotated: true,
 					scoped: scopedIds.has(id),
@@ -358,7 +358,6 @@ export async function openAnnotationEditor(
 					if (id in map) {
 						delete map[id];
 						this.save(map);
-						this.refreshFooterWidget(id, undefined);
 					}
 					this.returnToList();
 					return;
@@ -427,7 +426,6 @@ export async function openAnnotationEditor(
 			if (id in map) {
 				delete map[id];
 				this.save(map);
-				this.refreshFooterWidget(id, undefined);
 			}
 			this.confirmingId = "";
 			// After delete, always return to list (the annotation is gone,
@@ -463,20 +461,6 @@ export async function openAnnotationEditor(
 			const map = this.load();
 			map[id] = note;
 			this.save(map);
-			this.refreshFooterWidget(id, note);
-		}
-
-		// Fix the footer-widget staleness bug: the widget only auto-updates on
-		// model_select, so if we just edited the ACTIVE model's annotation we
-		// must refresh it ourselves.
-		private refreshFooterWidget(id: string, note: string | undefined) {
-			const active = this.ctx?.model?.id;
-			if (id === active) {
-				this.ctx?.ui?.setWidget?.(
-					"model-annotations",
-					note ? [id, note] : undefined,
-				);
-			}
 		}
 
 		// ── Input ───────────────────────────────────────────────────────

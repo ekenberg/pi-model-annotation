@@ -67,13 +67,4 @@ export default async function (pi: any) {
 		(m) => saveAnnotations(path, m),
 	);
 
-	// Bonus: persistent reminder of WHY the active model is here.
-	pi.on("model_select", async (event: any, ctx: any) => {
-		if (!ctx.hasUI) return;
-		const m = event?.model;
-		if (!m) return;
-		const note = loadAnnotations(path)[m.id];
-		if (note) ctx.ui.setWidget("model-annotations", [m.id, note]);
-		else ctx.ui.setWidget("model-annotations", undefined);
-	});
 }
