@@ -1,0 +1,12 @@
+{
+	"name": "pi-model-annotation",
+	"version": "1.0.0",
+	"description": "pi extension: annotate scoped models with notes shown in /model",
+	"keywords": ["pi-package"],
+	"pi": {
+		"extensions": ["./index.ts"]
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*"
+	}
+}
