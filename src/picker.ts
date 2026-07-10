@@ -12,8 +12,8 @@
 //     prefill: ExtensionInputComponent ignores its placeholder arg, so
 //     editInput.setValue(existingNote) is the only way to prefill). Enter =
 //     save (non-empty) → return to list. Esc = cancel → return to list.
-//     Ctrl+D → confirm mode. Empty+Enter = cancel (NOT delete — safe against
-//     accidental loss).
+//     Ctrl+D → confirm mode. Empty+Enter = delete (if the text is empty
+//     after trim, there's nothing to lose — re-opening and retyping is trivial).
 //   - CONFIRM: inline deletion prompt (NOT ctx.ui.confirm — that destroys
 //     the custom component by replacing editorContainer). y/Enter = delete →
 //     return to list. n/Esc = cancel → return to previous mode (list or edit).
@@ -29,15 +29,80 @@
 // The component class is defined inside openAnnotationEditor (after the dynamic
 // host import) so `Container`/`Input` are in scope at declaration time.
 
-import { realpathSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { homedir } from "node:os";
 
 function getHostDistDir(): string {
 	return dirname(realpathSync(process.argv[1]));
 }
 function hostUrl(rel: string): string {
 	return pathToFileURL(resolve(getHostDistDir(), rel)).href;
+}
+
+// ── Scoped-models helpers ───────────────────────────────────────────
+// The extension ctx does NOT expose session.scopedModels or settingsManager,
+// so we read the `enabledModels` patterns directly from settings.json (same
+// "read files directly" pattern as annotations). These are glob patterns
+// like ["claude-*", "gpt-4o"] used for Ctrl+P cycling.
+
+function getAgentDir(): string {
+	const override = process.env.PI_CODING_AGENT_DIR;
+	return override ? join(override, "agent") : join(homedir(), ".pi", "agent");
+}
+
+/** Read `enabledModels` patterns from settings.json (project overrides global). */
+function readEnabledModels(cwd: string): string[] {
+	try {
+		const globalPath = join(getAgentDir(), "settings.json");
+		const projectPath = join(cwd, ".pi", "settings.json");
+		let patterns: string[] | undefined;
+		// Global first, then project overrides.
+		if (existsSync(globalPath)) {
+			const raw = JSON.parse(readFileSync(globalPath, "utf8"));
+			if (Array.isArray(raw?.enabledModels)) patterns = raw.enabledModels;
+		}
+		if (existsSync(projectPath)) {
+			const raw = JSON.parse(readFileSync(projectPath, "utf8"));
+			if (Array.isArray(raw?.enabledModels)) patterns = raw.enabledModels;
+		}
+		return patterns ?? [];
+	} catch {
+		return [];
+	}
+}
+
+/** Convert a glob pattern (* → .*, ? → .) to a case-insensitive RegExp. */
+function globToRegex(pattern: string): RegExp {
+	const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
+	return new RegExp("^" + escaped + "$", "i");
+}
+
+/**
+ * Given glob patterns and available models, return the set of model IDs that
+ * are "scoped" (match any pattern). Patterns may have a `:thinkingLevel` suffix
+ * (e.g. `claude-*:high`) which is stripped before matching. A model matches if
+ * any pattern matches its id, name, or `provider/id`.
+ */
+function computeScopedIds(patterns: string[], models: any[]): Set<string> {
+	if (patterns.length === 0) return new Set();
+	// Strip thinking-level suffix, then compile glob regexes once.
+	const regexes = patterns.map((p) => {
+		const colonIdx = p.lastIndexOf(":");
+		const glob = colonIdx > 0 ? p.slice(0, colonIdx) : p;
+		return globToRegex(glob);
+	});
+	const scoped = new Set<string>();
+	for (const m of models) {
+		const candidates = [m.id, m.name, `${m.provider}/${m.id}`].filter(
+			(v): v is string => typeof v === "string",
+		);
+		if (candidates.some((c) => regexes.some((r) => r.test(c)))) {
+			scoped.add(m.id);
+		}
+	}
+	return scoped;
 }
 
 interface EditorItem {
@@ -51,6 +116,8 @@ interface EditorItem {
 	searchText: string;
 	/** whether this model has an annotation (drives the ★ marker + sort). */
 	annotated: boolean;
+	/** whether this model is in the user's scoped set (drives the ◆ marker + sort). */
+	scoped: boolean;
 }
 
 const MAX_VISIBLE = 10;
@@ -158,6 +225,9 @@ export async function openAnnotationEditor(
 				models.map((m: any) => [m.id, m]),
 			);
 
+			// Compute the scoped set from settings.json enabledModels patterns.
+			const scopedIds = computeScopedIds(readEnabledModels(this.ctx.cwd ?? "."), models);
+
 			// Annotated first (includes orphans).
 			for (const id of annotatedIds) {
 				const model = registryById.get(id);
@@ -168,6 +238,7 @@ export async function openAnnotationEditor(
 					hint: name ? `${id}  —  ${notes[id]}` : notes[id],
 					searchText: `${id} ${name ?? ""} ${notes[id]}`,
 					annotated: true,
+					scoped: scopedIds.has(id),
 				});
 			}
 
@@ -180,8 +251,20 @@ export async function openAnnotationEditor(
 					hint: m.name && m.name !== m.id ? m.id : undefined,
 					searchText: `${m.id} ${m.name ?? ""}`,
 					annotated: false,
+					scoped: scopedIds.has(m.id),
 				});
 			}
+
+			// Sort: ANNOTATED > SCOPED (not annotated) > REST. Within each tier,
+			// sort alphabetically by label (case-insensitive).
+			const tier = (item: EditorItem) =>
+				item.annotated ? 0 : item.scoped ? 1 : 2;
+			items.sort((a, b) => {
+				const ta = tier(a);
+				const tb = tier(b);
+				if (ta !== tb) return ta - tb;
+				return a.label.localeCompare(b.label, undefined, { sensitivity: "base" });
+			});
 
 			this.items = items;
 		}
@@ -199,6 +282,7 @@ export async function openAnnotationEditor(
 			this.clear();
 			const t = this.theme;
 			this.addChild(new Text(t.fg("accent", t.bold("  Model Annotations")), 0, 0));
+			this.addChild(new Text(t.fg("muted", "  ★ annotated  ◆ scoped"), 0, 0));
 			this.addChild(new Spacer(1));
 			this.addChild(this.searchInput);
 			this.addChild(new Spacer(1));
@@ -240,7 +324,7 @@ export async function openAnnotationEditor(
 			for (let i = start; i < end; i++) {
 				const m = this.filtered[i];
 				const isSel = i === this.selectedIndex;
-				const marker = m.annotated ? t.fg("accent", "★ ") : "  ";
+				const marker = m.annotated ? t.fg("accent", "★ ") : m.scoped ? t.fg("accent", "◆ ") : "  ";
 				const label = m.hint ? `${m.label}  ${t.fg("muted", m.hint)}` : m.label;
 				const line = isSel
 					? `${t.fg("accent", "→ ")}${marker}${t.fg("accent", label)}`
@@ -268,7 +352,14 @@ export async function openAnnotationEditor(
 			this.editInput.onSubmit = (value: string) => {
 				const trimmed = value.trim();
 				if (!trimmed) {
-					// Empty + Enter = cancel (not delete — safe against accidental loss).
+					// Empty + Enter = delete. If the text is empty after trim, there's
+					// nothing to lose — re-opening and retyping is trivial.
+					const map = this.load();
+					if (id in map) {
+						delete map[id];
+						this.save(map);
+						this.refreshFooterWidget(id, undefined);
+					}
 					this.returnToList();
 					return;
 				}
@@ -298,7 +389,7 @@ export async function openAnnotationEditor(
 				new Text(
 					t.fg(
 						"muted",
-						"  enter save · esc cancel · ctrl+d delete · empty+enter=cancel",
+						"  enter save · esc cancel · ctrl+d delete · empty+enter=delete",
 					),
 					0,
 					0,
