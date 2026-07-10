@@ -1,7 +1,11 @@
 // `/model-annotations` editor command.
 //
 // Interactive (no args): subcommand select -> searchable model picker -> note input.
-// Command-line (args):  power-user shortcut (list / get / set / rm).
+// Command-line (args):  power-user shortcut (list / set / rm).
+//
+// `list` shows all annotations and opens the highlighted one for editing (a
+// one-stop browse+edit view). There is no `get` — `list` covers it: picking an
+// entry opens the note editor prefilled.
 //
 // IMPORTANT wiring note: the factory-time `pi` (ExtensionAPI returned by
 // `createExtensionAPI` in pi's loader) does NOT expose `modelRegistry` at runtime
@@ -12,7 +16,7 @@
 // which receives no `ctx`.
 
 import { loadAnnotations, saveAnnotations } from "./storage.js";
-import { openModelPicker, openAnnotatedModelPicker, openListView } from "./picker.js";
+import { openModelPicker, openAnnotatedModelPicker } from "./picker.js";
 
 export function registerModelAnnotationsCommand(
 	pi: any,
@@ -20,9 +24,9 @@ export function registerModelAnnotationsCommand(
 	load: () => Record<string, string>,
 	save: (m: Record<string, string>) => void,
 ): void {
-	const SUBS = ["list", "get", "set", "rm"] as const;
+	const SUBS = ["list", "set", "rm"] as const;
 	// Subcommands that take a <model-id> as their next argument.
-	const MODEL_ARG_SUBS = new Set(["get", "set", "rm"]);
+	const MODEL_ARG_SUBS = new Set(["set", "rm"]);
 
 	// Cached available models, populated lazily from ctx.modelRegistry on first
 	// command use. getArgumentCompletions has no `ctx` (pi's provider calls it
@@ -86,22 +90,17 @@ async function runInteractiveFlow(
 ) {
 	if (!ctx.hasUI) {
 		ctx.ui.notify(
-			"Run /model-annotations in the interactive session, or pass a subcommand (list/get/set/rm).",
+			"Run /model-annotations in the interactive session, or pass a subcommand (list/set/rm).",
 			"info",
 		);
 		return;
 	}
 	const choice = await ctx.ui.select(
 		"Model annotations — what do you want to do?",
-		["list", "get", "set", "rm"],
+		["list", "set", "rm"],
 	);
 	if (!choice) return;
-	if (choice === "list") return doList(ctx, load);
-	if (choice === "get") {
-		const id = await openAnnotatedModelPicker(ctx, load);
-		if (!id) return;
-		return doGet(ctx, load, id);
-	}
+	if (choice === "list") return doList(ctx, load, save);
 	if (choice === "rm") {
 		const id = await openAnnotatedModelPicker(ctx, load);
 		if (!id) return;
@@ -124,12 +123,7 @@ async function runCommandLine(
 	const tokens = args.trim().split(/\s+/).filter(Boolean);
 	const sub = (tokens[0] || "list").toLowerCase();
 	const fail = (msg: string) => ctx.ui.notify(msg, "error");
-	if (sub === "list") return doList(ctx, load);
-	if (sub === "get") {
-		const id = tokens[1];
-		if (!id) return fail("Usage: /model-annotations get <model-id>");
-		return doGet(ctx, load, id);
-	}
+	if (sub === "list") return doList(ctx, load, save);
 	if (sub === "rm") {
 		const id = tokens[1];
 		if (!id) return fail("Usage: /model-annotations rm <model-id>");
@@ -141,31 +135,31 @@ async function runCommandLine(
 		if (!id) return fail("Usage: /model-annotations set <model-id> <note...>");
 		return doSet(ctx, load, save, id, { noteArg: tokens.slice(2).join(" ") });
 	}
-	return fail(`Unknown subcommand '${sub}'. Try: list | get | set | rm`);
+	return fail(`Unknown subcommand '${sub}'. Try: list | set | rm`);
 }
 
 // ── Shared actions ───────────────────────────────────────────────────
-function doList(ctx: any, load: () => Record<string, string>) {
+// `list`: browse all annotations and edit the highlighted one. The list view
+// IS the annotated-model picker — selecting an entry opens it for editing via
+// doSet (prefilled with the current note). Esc closes without editing.
+async function doList(
+	ctx: any,
+	load: () => Record<string, string>,
+	save: (m: Record<string, string>) => void,
+) {
 	const map = load();
 	const keys = Object.keys(map);
 	if (keys.length === 0) {
-		// Keep the empty-state as a notify (no point opening a TUI to show "empty").
 		return ctx.ui.notify(
 			"No model annotations yet. Run /model-annotations (no args) to add one.",
 			"info",
 		);
 	}
-	const title = `Annotations (${keys.length})`;
-	const lines = keys.map((k) => `${k}  —  ${map[k]}`);
-	return openListView(ctx, title, lines);
-}
-
-function doGet(ctx: any, load: () => Record<string, string>, id: string) {
-	const note = load()[id];
-	return ctx.ui.notify(
-		note ? `${id}: ${note}` : `No annotation for ${id}`,
-		note ? "info" : "warning",
-	);
+	const id = await openAnnotatedModelPicker(ctx, load, {
+		title: `Annotations (${keys.length}) — enter to edit`,
+	});
+	if (!id) return;
+	return doSet(ctx, load, save, id);
 }
 
 async function doRm(
