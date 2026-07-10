@@ -2,8 +2,14 @@
 //
 // Interactive (no args): subcommand select -> searchable model picker -> note input.
 // Command-line (args):  power-user shortcut (list / get / set / add / edit / rm / remove / delete).
-// Tab completion of the command name still works; the multi-level argument popups
-// are best-effort and are bypassed entirely by the no-args interactive flow.
+//
+// IMPORTANT wiring note: the factory-time `pi` (ExtensionAPI returned by
+// `createExtensionAPI` in pi's loader) does NOT expose `modelRegistry` at runtime
+// (the types promise it, but the runtime api object omits it). The
+// ModelRegistry is only available on the command-handler `ctx` and on event
+// contexts. So we read the model list from `ctx.modelRegistry` in the handler
+// and cache it in a closure for `getArgumentCompletions` (tab completion),
+// which receives no `ctx`.
 
 import { loadAnnotations, saveAnnotations } from "./storage.js";
 import { openModelPicker, openListView } from "./picker.js";
@@ -17,9 +23,14 @@ export function registerModelAnnotationsCommand(
 	const SUBS = ["list", "get", "set", "add", "edit", "rm", "remove", "delete"] as const;
 	// Subcommands that take a <model-id> as their next argument.
 	const MODEL_ARG_SUBS = new Set(["get", "set", "add", "edit", "rm", "remove", "delete"]);
-	// Build model completion items filtered by prefix (matches value OR label).
+
+	// Cached available models, populated lazily from ctx.modelRegistry on first
+	// command use. getArgumentCompletions has no `ctx` (pi's provider calls it
+	// with only the argument prefix), so it must read from this cache.
+	let cachedModels: any[] | null = null;
+
 	const getModelCompletions = (modelPrefix: string): any[] | null => {
-		const models: any[] = pi.modelRegistry?.getAvailable?.() ?? [];
+		const models = cachedModels ?? [];
 		const items = models.map((m: any) => ({
 			value: m.id,
 			label: m.name && m.name !== m.id ? m.name : m.id,
@@ -36,9 +47,6 @@ export function registerModelAnnotationsCommand(
 	pi.registerCommand("model-annotations", {
 		description:
 			"Manage model annotations shown in /model. Run with no args for the interactive picker.",
-		// Level-aware tab completion for the command-line form. Correct in principle;
-		// pi's autocomplete state machine is flaky for multi-level extension commands, so
-		// the no-args interactive flow is the recommended path.
 		getArgumentCompletions: (argumentText: string): any => {
 			const raw = argumentText ?? "";
 			const endsWithSpace = raw.length > 0 && /\s$/.test(raw);
@@ -58,8 +66,12 @@ export function registerModelAnnotationsCommand(
 			return null;
 		},
 		handler: async (args: string, ctx: any) => {
+			// Refresh the model cache from ctx.modelRegistry on every invocation.
+			// getAvailable() is auth-filtered and matches what /model shows.
+			cachedModels = ctx.modelRegistry?.getAvailable?.() ?? [];
+
 			if (args.trim() === "") {
-				return runInteractiveFlow(pi, ctx, load, save);
+				return runInteractiveFlow(ctx, load, save);
 			}
 			return runCommandLine(args, ctx, load, save);
 		},
@@ -68,7 +80,6 @@ export function registerModelAnnotationsCommand(
 
 // ── Interactive flow (no args) ────────────────────────────────────────
 async function runInteractiveFlow(
-	pi: any,
 	ctx: any,
 	load: () => Record<string, string>,
 	save: (m: Record<string, string>) => void,
@@ -87,17 +98,17 @@ async function runInteractiveFlow(
 	if (!choice) return;
 	if (choice === "list") return doList(ctx, load);
 	if (choice === "get") {
-		const id = await openModelPicker(pi, ctx);
+		const id = await openModelPicker(ctx);
 		if (!id) return;
 		return doGet(ctx, load, id);
 	}
 	if (choice === "rm") {
-		const id = await openModelPicker(pi, ctx);
+		const id = await openModelPicker(ctx);
 		if (!id) return;
 		return doRm(ctx, load, save, id);
 	}
 	if (choice === "set") {
-		const id = await openModelPicker(pi, ctx);
+		const id = await openModelPicker(ctx);
 		if (!id) return;
 		return doSet(ctx, load, save, id);
 	}

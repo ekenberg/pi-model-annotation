@@ -23,7 +23,7 @@ function hostUrl(rel: string): string {
  * Open the model picker. Resolves with the selected model id, or undefined
  * if the user cancelled (esc / ctrl+c) or there are no models.
  */
-export async function openModelPicker(pi: any, ctx: any): Promise<string | undefined> {
+export async function openModelPicker(ctx: any): Promise<string | undefined> {
 	if (!ctx.ui?.custom) {
 		ctx.ui?.notify?.("Model picker requires the interactive TUI session", "error");
 		return undefined;
@@ -32,7 +32,7 @@ export async function openModelPicker(pi: any, ctx: any): Promise<string | undef
 		hostUrl("../node_modules/@earendil-works/pi-tui/dist/index.js")
 	);
 	const { Container, Text, Spacer } = tuiMod;
-	const models: any[] = pi.modelRegistry?.getAvailable?.() ?? [];
+	const models: any[] = ctx.modelRegistry?.getAvailable?.() ?? [];
 	if (models.length === 0) {
 		ctx.ui.notify("No models available in the registry", "error");
 		return undefined;
@@ -57,7 +57,7 @@ export async function openModelPicker(pi: any, ctx: any): Promise<string | undef
 			this.items = items;
 			this.theme = theme;
 			this.done = done;
-			this.render();
+			this.populate();
 		}
 
 		private get filtered(): { id: string; name?: string }[] {
@@ -70,7 +70,11 @@ export async function openModelPicker(pi: any, ctx: any): Promise<string | undef
 			);
 		}
 
-		private render() {
+		// Populate the children. The inherited Container.render(width) is what
+		// pi-tui actually calls to draw the component — we must NOT override
+		// render. We only populate the child list here (from the constructor and
+		// on each input change), and let the inherited render produce the lines.
+		private populate() {
 			this.clear();
 			const t = this.theme;
 			// Filter line
@@ -194,10 +198,13 @@ export async function openListView(
 			this.title = title;
 			this.theme = theme;
 			this.done = done;
-			this.render();
+			this.populate();
 		}
 
-		private render() {
+		// Populate children. Do NOT override render(width) — the inherited
+		// Container.render is what pi-tui calls to actually draw lines; we
+		// only manage the child list here.
+		private populate() {
 			this.clear();
 			const t = this.theme;
 			this.addChild(
