@@ -93,16 +93,8 @@ function appendAnnotations(
 	const note = getNote(key);
 	if (!note) return;
 
-	const model = selected.model || {};
-	const name = model.name || selected.id;
 	listContainer.addChild(new Spacer(1));
 	listContainer.addChild(new Text(theme.fg("border", "  " + "─".repeat(50)), 0, 0));
-	listContainer.addChild(
-		new Text(
-			"  " + theme.bold(theme.fg("accent", name)) + theme.fg("muted", "  [" + selected.provider + "]"),
-			0,
-			0,
-		),
-	);
+	listContainer.addChild(new Text(theme.fg("muted", "  Annotations"), 0, 0));
 	listContainer.addChild(new Text("  " + theme.fg("accent", note), 0, 0));
 }
