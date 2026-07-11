@@ -14,7 +14,7 @@ model here" notes to models and shows them in the built-in `/model` selector.
 - `README.md` — install + usage.
 - `DEV.md` — design notes, branches, edit loop.
 - `STATUS.md` — handoff / current state (read before changing anything).
-- `PLAN-sort-filter.md` — plan for the open sorting-while-filtering issue.
+- `PLAN-sort-filter.md` — plan for sorting-while-filtering (implemented; kept for context).
 
 ## Verified constraint
 pi exposes **no official extension hook** into the `/model` list rendering,

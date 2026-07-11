@@ -282,18 +282,18 @@ blocker (`ctx.ui.confirm` destroys `ctx.ui.custom`, §5.8) before commit.
 Footer widget was added in v1, found to be not useful (rendered model id +
 note as two lines above the editor after `/model` selection), and removed.
 
-## 8. Open issue: sort breaks when filtering (PLAN-sort-filter.md)
-The ANNOTATED > SCOPED > REST sort works for the default (unfiltered) list,
-but `fuzzyFilter` reorders results by fuzzy match score, discarding the
-pre-sort. See `PLAN-sort-filter.md` for the diagnosis and fix plan.
+## 8. Resolved: sort breaks when filtering
+The ANNOTATED > SCOPED > REST sort now holds while filtering. `fuzzyFilter`
+re-sorts by match score (discarding the tier sort), so `applyFilter` re-applies
+the tier comparator (`editorItemRank`) to the filtered results. Empty-filter
+path unchanged. See `PLAN-sort-filter.md` for the full diagnosis.
 
 ## 9. Future work
-1. **Sort-while-filtering** (open — see `PLAN-sort-filter.md`).
-2. **Tests:** no suite. A unit test for `appendAnnotations` (inline regex +
+1. **Tests:** no suite. A unit test for `appendAnnotations` (inline regex +
    ANSI strip) and the scoped-glob matching (`globToRegex` +
-   `computeScopedIds`) would catch regressions cheaply. Transpile TS and
-   unit-test pure functions without jiti.
-3. **Multi-line notes:** `Input` is single-line (strips newlines from paste).
+   `computeScopedIds`) and the tier sort (`editorItemRank`) would catch
+   regressions cheaply. Transpile TS and unit-test pure functions without jiti.
+2. **Multi-line notes:** `Input` is single-line (strips newlines from paste).
    Fine for short notes. If multi-line is ever wanted, swap `Input` for
    `Editor` (~1881 lines, much bigger change) or use `ctx.ui.editor` modal
    (has the same prefill problem as `ctx.ui.input`, §5.6 — would need verifying).
@@ -325,4 +325,4 @@ PI_OFFLINE=1 PI_SKIP_VERSION_CHECK=1 pi -p "ignore"
 
 ---
 
-*End of handoff. Next session: read §5 (gotchas), §6 (key handling), and §8 (open issue) before changing anything.*
+*End of handoff. Next session: read §5 (gotchas) and §6 (key handling) before changing anything.*

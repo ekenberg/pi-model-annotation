@@ -1,4 +1,8 @@
-# Plan: fix sort breaking when filtering (issue 3)
+# Plan: fix sort breaking when filtering (issue 3) — IMPLEMENTED
+
+**Status: DONE** (2026-07-11). The fix below is committed; `editorItemRank`
+is extracted as a module-level function and re-applied in `applyFilter`.
+This file is kept for historical context; see STATUS.md §8 (now marked resolved).
 
 ## Symptom
 The ANNOTATED > SCOPED > REST sort works for the default (unfiltered) list,

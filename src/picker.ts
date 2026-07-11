@@ -120,6 +120,20 @@ interface EditorItem {
 	scoped: boolean;
 }
 
+/**
+ * Tier comparator: ANNOTATED > SCOPED (not annotated) > REST, then alphabetical
+ * by label (case-insensitive). Applied to the full list in rebuildItems AND to
+ * the filtered list in applyFilter — fuzzyFilter re-sorts by match score, so
+ * the tier sort must be re-applied after filtering or the tiers break.
+ */
+function editorItemRank(a: EditorItem, b: EditorItem): number {
+	const tier = (item: EditorItem) => (item.annotated ? 0 : item.scoped ? 1 : 2);
+	const ta = tier(a);
+	const tb = tier(b);
+	if (ta !== tb) return ta - tb;
+	return a.label.localeCompare(b.label, undefined, { sensitivity: "base" });
+}
+
 const MAX_VISIBLE = 10;
 
 async function loadTui() {
@@ -257,14 +271,7 @@ export async function openAnnotationEditor(
 
 			// Sort: ANNOTATED > SCOPED (not annotated) > REST. Within each tier,
 			// sort alphabetically by label (case-insensitive).
-			const tier = (item: EditorItem) =>
-				item.annotated ? 0 : item.scoped ? 1 : 2;
-			items.sort((a, b) => {
-				const ta = tier(a);
-				const tb = tier(b);
-				if (ta !== tb) return ta - tb;
-				return a.label.localeCompare(b.label, undefined, { sensitivity: "base" });
-			});
+			items.sort(editorItemRank);
 
 			this.items = items;
 		}
@@ -272,6 +279,9 @@ export async function openAnnotationEditor(
 		private applyFilter() {
 			const q = this.searchInput.getValue();
 			this.filtered = q ? fuzzyFilter(this.items, q, (m) => m.searchText) : this.items;
+			// fuzzyFilter re-sorts by match score; re-apply the tier sort so
+			// ANNOTATED > SCOPED > REST holds while filtering.
+			if (q) this.filtered = [...this.filtered].sort(editorItemRank);
 			if (this.selectedIndex >= this.filtered.length) {
 				this.selectedIndex = Math.max(0, this.filtered.length - 1);
 			}
