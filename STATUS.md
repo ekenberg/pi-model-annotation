@@ -319,10 +319,12 @@ the tier comparator (`editorItemRank`) to the filtered results. Empty-filter
 path unchanged. See `PLAN-sort-filter.md` for the full diagnosis.
 
 ## 9. Future work
-1. **Tests:** no suite. A unit test for `appendAnnotations` (inline regex +
-   ANSI strip) and the scoped-glob matching (`globToRegex` +
-   `computeScopedIds`) and the tier sort (`editorItemRank`) would catch
-   regressions cheaply. Transpile TS and unit-test pure functions without jiti.
+1. **Tests:** `test/patch.test.mjs` covers the patch teardown/accumulation
+   regression (`npm test`; Node strips TS types, no deps — imports
+   `../src/patch.ts` directly, with a negative control that proves the harness
+   detects accumulation). Still uncovered and worth adding cheaply: unit tests
+   for `appendAnnotations` (inline regex + ANSI strip), scoped-glob matching
+   (`globToRegex` + `computeScopedIds`), and the tier sort (`editorItemRank`).
 2. **Multi-line notes:** `Input` is single-line (strips newlines from paste).
    Fine for short notes. If multi-line is ever wanted, swap `Input` for
    `Editor` (~1881 lines, much bigger change) or use `ctx.ui.editor` modal
@@ -333,6 +335,9 @@ path unchanged. See `PLAN-sort-filter.md` for the full diagnosis.
 ```bash
 # Workspace is the source of truth.
 cd /home/johan/srv/syncthing/projects/pi-model-annotation
+
+# Run the regression suite (no deps; Node strips TS types):
+npm test
 
 # After edits, on the `live` branch:
 git add -A

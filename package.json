@@ -3,6 +3,9 @@
 	"version": "1.0.0",
 	"description": "pi extension: annotate scoped models with notes shown in /model",
 	"keywords": ["pi-package"],
+	"scripts": {
+		"test": "node --test test/*.test.mjs"
+	},
 	"pi": {
 		"extensions": ["./index.ts"]
 	},
