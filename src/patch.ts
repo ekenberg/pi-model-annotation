@@ -3,10 +3,93 @@
 // We do NOT edit pi's dist files: the host module is imported at runtime,
 // the prototype method is wrapped (call original, then append), and the
 // patch is removed on session_shutdown. This survives `pi update`.
+//
+// Stacking-proof teardown (see STATUS.md §5.x — duplicate detail panes):
+// pi re-inits extensions on every session/reload (newSession/fork/
+// switchSession/reload) within one long-lived process, and the component
+// prototype is shared (ESM module cache). When TWO extensions wrap the same
+// `updateList` (here: `pi-model-selector-x` AND this one) with an
+// outermost-only unpatch guard, the inner wrapper cannot remove itself when it
+// is not outermost — it gets ORPHANED into the chain and re-wrapped next cycle,
+// stacking one extra appended detail pane (card) per cycle. That is the
+// "duplicate cards in /model" bug.
+//
+// Fix: capture pi's pristine `updateList` ONCE, and on teardown reset the whole
+// prototype back to pristine (a full unwind of the wrapper chain) instead of a
+// polite single-layer restore. Every cycle then starts from a clean prototype,
+// so nothing accumulates. Install-time idempotency still does a *polite*
+// self-removal so we chain on top of selector-x's card within a cycle.
 
 const PATCH_KEY = Symbol.for("pi-model-annotation:update-list");
+// Cache of pi's original, unwrapped updateList (stashed on the prototype).
+const PRISTINE_KEY = Symbol.for("pi-model-annotation:pristine-update-list");
+// pi-model-selector-x's public patch record — read only to peel its layer when
+// recovering the pristine method. Absence is fine (we just see fewer layers).
+const SX_PATCH_KEY = Symbol.for("pi-model-selector-x:update-list-patch");
 
 type GetNote = (key: string) => string | undefined;
+
+type PatchRecord = { original: (...args: any[]) => any; patched: (...args: any[]) => any };
+
+// Recover pi's pristine updateList by peeling wrapper layers we can recognize
+// (ours + pi-model-selector-x). Cached on the prototype so it is computed once,
+// on the first clean load, where a single peel reaches the true original.
+//
+// NOTE: this is only guaranteed pristine when first run in a CLEAN process
+// (fresh `pi` start). Hot-reloading this fix into an already-duplicated process
+// cannot recover the buried original — do one full restart after deploying.
+function resolvePristineUpdateList(proto: any): ((...args: any[]) => any) | undefined {
+	const cached = proto[PRISTINE_KEY];
+	if (typeof cached === "function") return cached;
+
+	let fn = proto.updateList;
+	const seen = new Set<unknown>();
+	while (typeof fn === "function" && !seen.has(fn)) {
+		seen.add(fn);
+		const ours: PatchRecord | undefined = proto[PATCH_KEY];
+		if (ours && fn === ours.patched && typeof ours.original === "function") {
+			fn = ours.original;
+			continue;
+		}
+		const sx: PatchRecord | undefined = proto[SX_PATCH_KEY];
+		if (sx && fn === sx.patched && typeof sx.original === "function") {
+			fn = sx.original;
+			continue;
+		}
+		break;
+	}
+
+	if (typeof fn === "function") {
+		proto[PRISTINE_KEY] = fn;
+		return fn;
+	}
+	return undefined;
+}
+
+// Polite, single-layer removal of OUR wrapper only (keeps other patches such as
+// selector-x's card intact). Used for install-time idempotency.
+function removeOwnLayer(proto: any): void {
+	const rec: PatchRecord | undefined = proto[PATCH_KEY];
+	if (!rec) return;
+	if (proto.updateList === rec.patched) {
+		proto.updateList = rec.original;
+	}
+	delete proto[PATCH_KEY];
+}
+
+// Full teardown: reset the shared prototype to pi's pristine updateList,
+// unwinding the ENTIRE wrapper chain. This is what prevents cross-extension
+// wrapper accumulation. Falls back to a polite restore if pristine was never
+// captured.
+function resetToPristine(proto: any): void {
+	const pristine = proto[PRISTINE_KEY];
+	if (typeof pristine === "function") {
+		proto.updateList = pristine;
+		delete proto[PATCH_KEY];
+		return;
+	}
+	removeOwnLayer(proto);
+}
 
 export function installModelAnnotationsPatch(
 	ModelSelectorComponent: any,
@@ -16,7 +99,13 @@ export function installModelAnnotationsPatch(
 	getNote: GetNote,
 ): () => void {
 	const proto = ModelSelectorComponent.prototype;
-	uninstallModelAnnotationsPatch(ModelSelectorComponent); // idempotent
+
+	// Capture pi's pristine method before we (or a re-install) wrap it.
+	resolvePristineUpdateList(proto);
+
+	// Idempotent: drop any previous copy of OUR wrapper, but keep other patches
+	// (e.g. selector-x) so we chain on top of their card within this cycle.
+	removeOwnLayer(proto);
 
 	const original = proto.updateList;
 	const patched = function (this: any) {
@@ -30,17 +119,9 @@ export function installModelAnnotationsPatch(
 
 	proto.updateList = patched;
 	proto[PATCH_KEY] = { original, patched };
-	return () => uninstallModelAnnotationsPatch(ModelSelectorComponent);
-}
 
-function uninstallModelAnnotationsPatch(ModelSelectorComponent: any): void {
-	const proto = ModelSelectorComponent.prototype;
-	const p = proto[PATCH_KEY];
-	if (!p) return;
-	if (proto.updateList === p.patched) {
-		proto.updateList = p.original;
-	}
-	delete proto[PATCH_KEY];
+	// Teardown resets to pristine (full unwind) — see file header.
+	return () => resetToPristine(proto);
 }
 
 function appendAnnotations(
