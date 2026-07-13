@@ -13,6 +13,16 @@ at extension load, dynamically import pi's own bundled
 `ModelSelectorComponent.prototype.updateList` so it calls the original and
 then appends our annotation. Unpatch on `session_shutdown`.
 
+**Stacking-proof teardown.** `pi-model-selector-x` wraps the same `updateList`
+and pi re-inits extensions every session/reload cycle. Both patchers using an
+outermost-only unpatch caused wrappers to orphan and re-stack (one duplicate
+detail card per `/reload`). So `src/patch.ts` captures pi's pristine
+`updateList` once and, on teardown, resets the whole prototype to pristine
+(full chain unwind) instead of restoring only its own layer. Install stays
+politely chained so we still sit on top of selector-x's card. Pristine capture
+needs a clean process — do one full `pi` restart after deploying, not just
+`/reload`.
+
 **Display in `/model`.** Two parts, both inside the same patched `updateList`:
 1. *Inline tag* on every annotated row (the row's `id` token is matched
    against the annotation map; the tag is auto-truncated to 40 chars so long

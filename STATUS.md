@@ -6,6 +6,22 @@ This is the handoff document for the next session. Read §5 (gotchas) and §7 be
 
 ---
 
+## 0.1 UPDATE (2026-07-13 — duplicate /model detail-pane fix)
+
+Fixed the "stacked duplicate detail cards in `/model`" bug (one extra card per
+`/reload`). Root cause: `pi-model-annotation` and `pi-model-selector-x` both
+monkeypatch `ModelSelectorComponent.prototype.updateList` with an
+outermost-only unpatch; across pi's per-session/reload extension re-init the
+first-loaded wrapper (selector-x) orphans and re-stacks. Fix: teardown now
+resets the shared prototype to pi's pristine `updateList` (full unwind) — see
+§4 and `src/patch.ts` (`resolvePristineUpdateList` / `removeOwnLayer` /
+`resetToPristine`). Reviewer (fresh-context): correct/safe, no blockers.
+Verified live: bug reproduced deterministically via repeated `/reload`, then
+gone after deploy + full restart, stays at one card through 4+ reloads.
+Commit `6b1fba9` on `live` (and `main`). Caveat documented: pristine capture
+needs a clean process, so do one full `pi` restart after deploying, not just
+`/reload`.
+
 ## 0. CURRENT STATE (2026-07-11 — unified editor + scoped sorting)
 
 `/model-annotations` (no args, no subcommands, no tab completion) opens ONE
@@ -162,8 +178,22 @@ pi exposes **no official extension hook** into the `/model` list rendering, and
 import pi's own bundled `modes/interactive/components/model-selector.js`
 (resolved from `dirname(realpathSync(process.argv[1]))`), wrap `updateList` so
 it calls the original and then appends our annotation, and unpatch on
-`session_shutdown`. The patch chains safely with other patches (idempotent
-uninstall-first). No edits to pi's dist files on disk — survives `pi update`.
+`session_shutdown`. No edits to pi's dist files on disk — survives `pi update`.
+
+**Teardown resets the prototype to pristine (2026-07-13 fix).** The earlier
+"idempotent uninstall-first" restore was *outermost-only* — and so is
+`pi-model-selector-x`'s. With both extensions wrapping the same `updateList`
+and pi re-initing extensions every `session_shutdown`→re-init cycle
+(`/reload`, newSession, fork, switchSession), the extension loaded first
+(selector-x, per settings order) could not restore itself when it wasn't
+outermost, orphaning its wrapper; the next cycle re-wrapped it, stacking one
+extra detail card per `/reload`. Fix in `src/patch.ts`: capture pi's pristine
+`updateList` once (`resolvePristineUpdateList`, peeling known wrapper records),
+keep *install* idempotent + politely chained (`removeOwnLayer`, so we still sit
+on top of selector-x's card within a cycle), and on *teardown* reset the whole
+prototype to pristine (`resetToPristine`) — a full chain unwind so nothing can
+accumulate. Caveat: pristine capture is reliable only from a clean process; do
+one full `pi` restart (not just `/reload`) after deploying.
 
 ## 5. Key implementation gotchas (learned the hard way — read before changing)
 
